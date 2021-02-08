@@ -1,0 +1,140 @@
+---
+title: "a2_task2_joe_walderman"
+author: "Joe Walderman"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(janitor)
+library(here)
+library(GGally)
+library(broom)
+library(jtools)
+library(ggbeeswarm)
+library(kableExtra)
+library(yardstick)
+```
+## Reading in data and wrangling
+```{r}
+palmetto <- read.csv(here("data", "palmetto.csv"))
+
+palmetto_viz <- palmetto %>% 
+  mutate(species = case_when(
+    species == 1 ~ "serenoa",
+    species == 2 ~ "sabal" #renaming species
+  ))
+
+palmetto_viz$species <- as.factor(palmetto_viz$species) %>% 
+  fct_drop()
+
+#levels(palmetto_viz$species)
+
+#palmetto_viz %>% 
+#  select(species, height:green_lvs) %>% 
+#  ggpairs(aes(color = species))
+```
+
+## Data exploration
+```{r}
+ggplot(data = palmetto_viz, aes(x = length, y = height)) +
+  geom_point(aes(color = species)) +
+  labs(x = "Canopy Length (cm)",
+       y = "Height (cm)",
+       title = "Height and Canopy Length of Palmetto Species") +
+  facet_wrap(~species) +
+  theme_minimal()
+```
+
+**Figure 1:** Height and canopy length of dominant palmetto species in south-central Florida from 1981-2017. Color is scaled for number of green leaves observed on each plant.
+
+* The relationship between canopy length and height seems very linear for both species. Sabal seems to have greater range and magnitude of canopy length while serenoa seems to have greater range and magnitude of height. 
+
+
+```{r}
+ggplot(data = palmetto_viz, aes(x = species, y = width)) +
+  geom_jitter(aes(color = green_lvs)) +
+  labs(x = "Species",
+       y = "Width (cm)",
+       title = "Canopy Width and Green Leaf Count for Palmetto Species",
+       color = "Green Leaves") +
+  theme_minimal()
+```
+
+**Figure 2:** Canopy width and number of green leaves observed for dominant palmetto species in south-central Florida from 1981-2017. Color is scaled for number of green leaves.
+
+* Canopy width seems fairly consistent across both species but the serenoa species seems to generally have more green leaves.
+
+```{r}
+ggplot(data = palmetto_viz, aes(x = species, y = green_lvs, fill = species)) +
+  geom_boxplot(show.legend = FALSE) +
+   labs(x = "Species",
+       y = "Green Leaves",
+       title = "Green Leaf Count for Palmetto Species") +
+  theme_minimal()
+```
+
+**Figure 3:** Number of green leaves observed for dominant palmetto species in south-central Florida from 1981-2017. Solid horizontal line represents group mean, box represents range of 25th to 75th percentile. 
+
+* This visualization confirms that serenoa species has a greater mean green leaf count.
+
+
+## Outcome of blr model
+```{r}
+#Binary linear regression model
+palmetto_blr <- glm(species ~ height + length + width + green_lvs, 
+                            data = palmetto_viz, 
+                            family = "binomial")
+
+#Looking at the model
+#summary(palmetto_blr)
+
+#Getting a tidy version
+blr_tidy <- tidy(palmetto_blr) 
+
+blr_tidy %>% 
+   kable(col.names = c("Term",
+                      "Estimate",
+                      "St Error",
+                      "t-statistic",
+                      "p-value")) %>% 
+  kable_styling(full_width = FALSE)
+```
+
+## Evaluating the accuracy of the model's classification
+
+```{r}
+#Converting log odds to probabilities that observation is a Serenoa based on model
+blr_fitted <- palmetto_blr %>% 
+  broom::augment(type.predict = "response")
+
+##Creating finalized table
+palmetto_tbl <- blr_fitted %>% 
+  mutate(
+    predicted = case_when(
+    .fitted > 0.50 ~ "Serenoa",
+    .fitted <= 0.50 ~ "Sabal"),
+    species = case_when(
+      species == "sabal" ~ "Observed Sabal",
+      species == "serenoa" ~ "Observed Serenoa"
+    )) %>% 
+  tabyl(species, predicted)
+```
+
+
+**Table 1:** The accuracy of this model in classifying palmetto plants as the correct species (serenoa or sabal) is illustrated in this table. The model correctly classified `r round(palmetto_tbl$Sabal[1])` or `r round(round(palmetto_tbl$Sabal[1]) / (round(palmetto_tbl$Sabal[1]) + round(palmetto_tbl$Serenoa[1])) * 100,2)`% of observed sabal species and `r round(palmetto_tbl$Serenoa[2])` or `r round(round(palmetto_tbl$Serenoa[2]) / (round(palmetto_tbl$Sabal[2]) + round(palmetto_tbl$Serenoa[2])) * 100,2)`% of serenoa species.
+
+```{r}
+palmetto_proportions <- palmetto_tbl %>% 
+  adorn_percentages() %>% # showing percentage of people surveyed from each party responding no, unsure, or yes to environmentalist question
+  adorn_pct_formatting(digits = 2) %>% # rounding decimals
+  adorn_ns() %>% 
+  kable(col.names = c("", "Predicted Sabal", "Predicted Serenoa")) %>% 
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)# actual counts in each cell as well in parenthesis
+
+palmetto_proportions
+```
+
